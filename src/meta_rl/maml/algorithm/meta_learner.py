@@ -122,15 +122,15 @@ class MetaLearner:
 
                 # 학습 경로의 수집과 정책의 적응을 반복한 후 평가 경로를 수집
                 trajs = self.sampler.obtain_samples(max_samples=self.num_samples)
-                self.buffers.add_trajs(cur_task, cur_adapt, trajs)
+                self.buffers.add_trajs(cur_task, cur_adapt, trajs)  # TODO 적응 중 trajs + 적응 후 테스트 1번 trajs
 
                 if cur_adapt < self.num_adapt_epochs:  # TODO num_adapt_epochs 번 적응
-                    train_batch = self.buffers.get_trajs(cur_task, cur_adapt)
+                    train_batch = self.buffers.get_trajs(cur_task, cur_adapt)  # TODO 적응 중 trajs만
 
                     # 정책의 태스크 적응
                     # TODO
-                    #  1 번만 적응할 거면 업데이트 없음
-                    #  n 번 적응할 거면 n-1 번 업데이트 후 마지막 업데이트 없음 (n>1)
+                    #  num_adapt_epochs 번 params 업데이트 수행
+                    #  마지막 업데이트 때는 require_grad = False로 하고 업데이트 수행
                     inner_loss = self.agent.policy_loss(train_batch)
                     self.inner_optimizer.zero_grad(set_to_none=True)
                     require_grad = cur_adapt < self.num_adapt_epochs - 1
@@ -176,22 +176,23 @@ class MetaLearner:
                 require_grad = cur_adapt < self.num_adapt_epochs - 1 or set_grad
 
                 # 버퍼에 저장된 태스크 학습 경로 얻기
-                train_batch = self.buffers.get_trajs(cur_task, cur_adapt)
+                train_batch = self.buffers.get_trajs(cur_task, cur_adapt)  # TODO 적응 중 trajs만
 
                 # 액터-크리틱 알고리즘을 사용한 정책의 태스크 적응
                 inner_loss = self.agent.policy_loss(train_batch)
-                self.inner_optimizer.zero_grad(set_to_none=True)
+                self.inner_optimizer.zero_grad(set_to_none=True)  # TODO ???
                 inner_loss.backward(create_graph=require_grad)
 
                 with torch.set_grad_enabled(require_grad):
                     self.inner_optimizer.step()
 
             # Surrogate 손실 계산을 위해 line search 초기 정책으로 초기화
-            valid_params = self.buffers.get_params(cur_task, self.num_adapt_epochs)
+            valid_params = self.buffers.get_params(cur_task, self.num_adapt_epochs)  # TODO theta_prime_i
             self.agent.update_model(self.agent.old_policy, valid_params)
 
             # 메타-배치 태스크에 대한 메타러닝 손실로서 평가경로의 surrogage 손실 계산
-            valid_batch = self.buffers.get_trajs(cur_task, self.num_adapt_epochs)
+            # TODO MAML paper: Algorithm 3: line 10
+            valid_batch = self.buffers.get_trajs(cur_task, self.num_adapt_epochs)  # TODO D_prime_i
             loss = self.agent.policy_loss(valid_batch, is_meta_loss=True)
             losses.append(loss)
 
@@ -206,6 +207,7 @@ class MetaLearner:
             self.agent.update_model(self.agent.policy, backup_params)
         return torch.stack(losses).mean(), torch.stack(kls).mean(), torch.stack(entropies).mean()
 
+    # TODO MAML paper: Algorithm 3: line 10
     def meta_update(self) -> Dict[str, float]:
         # 외부 루프 (outer loop)
         # Line search를 시작하기 위한 첫 경사하강 스텝 계산
